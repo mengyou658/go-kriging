@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"fmt"
 
+	jsoniter "github.com/json-iterator/go"
 	"image/color"
 	"image/png"
 	"io/ioutil"
@@ -19,7 +20,7 @@ import (
 )
 
 const testDataDirPath = "testdata"
-const tempDataDirPath = "tempdata"
+const tempDataDirPath = "C:/Users/User/Downloads"
 const cpuProfileFilePath = tempDataDirPath + "/cpu_profile"
 const memProfileFilePath = tempDataDirPath + "/mem_profile"
 
@@ -33,9 +34,9 @@ func main() {
 	//	log.Fatal(err)
 	//}
 	//defer func() {
-		//pprof.StopCPUProfile()
-		//cpuProfile.Close()
-		//memProfile.Close()
+	//pprof.StopCPUProfile()
+	//cpuProfile.Close()
+	//memProfile.Close()
 	//}()
 
 	data, err := readCsvFile("examples/csv/testdata/2045.csv")
@@ -72,6 +73,10 @@ func main() {
 func gridPlot(ordinaryKriging *ordinarykriging.Variogram, polygon ordinarykriging.PolygonCoordinates) {
 	defer timeCost()("插值生成网格图片耗时")
 	gridMatrices := ordinaryKriging.Grid(polygon, 0.01)
+	var json = jsoniter.ConfigCompatibleWithStandardLibrary
+
+	marshal, _ := json.Marshal(&ordinarykriging.DefaultGridLevelColor)
+	fmt.Printf("Color: %+v", string(marshal))
 	ctx := ordinaryKriging.Plot(gridMatrices, 500, 500, gridMatrices.Xlim, gridMatrices.Ylim, ordinarykriging.DefaultGridLevelColor)
 
 	subTitle := &canvas.TextConfig{
