@@ -93,9 +93,10 @@ func (variogram *Variogram) Train(model ModelType, sigma2 float64, alpha float64
 	k = 0
 	for ; i < n; i++ {
 		for j = 0; j < i; {
-			distance[k] = [2]float64{}
-			distance[k][0] = math.Sqrt(pow2(variogram.x[i]-variogram.x[j]) + pow2(variogram.y[i]-variogram.y[j]))
-			distance[k][1] = math.Abs(variogram.t[i] - variogram.t[j])
+			tmp := [2]float64{}
+			tmp[0] = math.Sqrt(pow2(variogram.x[i]-variogram.x[j]) + pow2(variogram.y[i]-variogram.y[j]))
+			tmp[1] = math.Abs(variogram.t[i] - variogram.t[j])
+			distance = append(distance, tmp)
 			j++
 			k++
 		}
@@ -497,15 +498,17 @@ func (variogram *Variogram) Plot(gridMatrices *GridMatrices, width, height int, 
 					z = 1.0
 				}
 
-				colorIndex := -1
-				for index, item := range colors {
-					if distance >= item.Value[0] && distance <= item.Value[1] {
-						colorIndex = index
-						break
-					}
-				}
+				//colorIndex := -1
+				//for index, item := range colors {
+				//	if distance >= item.Value[0] && distance <= item.Value[1] {
+				//		colorIndex = index
+				//		break
+				//	}
+				//}
+				colorIndex := int(math.Floor(float64(len(colors))*z*z)) - 1
+
 				if colorIndex == -1 {
-					continue
+					colorIndex = 0
 				}
 				color := colors[colorIndex].Color
 				ctx.DrawRect(math.Round(x-wx/2), math.Round(y-wy/2), wx, wy, color)

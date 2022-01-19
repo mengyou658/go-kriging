@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
-	"image/color"
 	"image/png"
 	"io/ioutil"
 	"log"
@@ -14,13 +13,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/liuvigongzuoshi/go-kriging/canvas"
 	"github.com/liuvigongzuoshi/go-kriging/ordinarykriging"
 	"github.com/liuvigongzuoshi/go-kriging/pkg/json"
 )
 
 const testDataDirPath = "testdata"
-const tempDataDirPath = "C:/Users/User/Downloads"
+const tempDataDirPath = "C:/"
 const cpuProfileFilePath = tempDataDirPath + "/cpu_profile"
 const memProfileFilePath = tempDataDirPath + "/mem_profile"
 
@@ -85,18 +83,18 @@ func gridPlot(ordinaryKriging *ordinarykriging.Variogram, polygon ordinarykrigin
 	fmt.Printf("Color: %+v", string(marshal))
 	ctx := ordinaryKriging.Plot(gridMatrices, 500, 500, gridMatrices.Xlim, gridMatrices.Ylim, ordinarykriging.DefaultGridLevelColor)
 
-	subTitle := &canvas.TextConfig{
-		Text:     "球面半变异函数模型",
-		FontName: testDataDirPath + "/fonts/source-han-sans-sc/regular.ttf",
-		FontSize: 28,
-		Color:    color.RGBA{R: 0, G: 0, B: 0, A: 255},
-		OffsetX:  252,
-		OffsetY:  40,
-		AlignX:   0.5,
-	}
-	if err := ctx.DrawText(subTitle); err != nil {
-		log.Fatalf("DrawText %v", err)
-	}
+	//subTitle := &canvas.TextConfig{
+	//	Text:     "球面半变异函数模型",
+	//	FontName: testDataDirPath + "/fonts/source-han-sans-sc/regular.ttf",
+	//	FontSize: 28,
+	//	Color:    color.RGBA{R: 0, G: 0, B: 0, A: 255},
+	//	OffsetX:  252,
+	//	OffsetY:  40,
+	//	AlignX:   0.5,
+	//}
+	//if err := ctx.DrawText(subTitle); err != nil {
+	//	log.Fatalf("DrawText %v", err)
+	//}
 
 	buffer, err := ctx.Output()
 	if err != nil {

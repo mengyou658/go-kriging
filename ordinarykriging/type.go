@@ -25,6 +25,7 @@ var (
 	}
 	DefaultGridLevelColor = []GridLevelColor{
 		{Color: NewRGBA(40, 146, 199, 255), Value: [2]float64{-30, -15}},
+		{Color: NewRGBA(40, 146, 199, 255), Value: [2]float64{-30, -15}},
 		{Color: NewRGBA(96, 163, 181, 255), Value: [2]float64{-15, -10}},
 		{Color: NewRGBA(140, 184, 164, 255), Value: [2]float64{-10, -5}},
 		{Color: NewRGBA(177, 204, 145, 255), Value: [2]float64{-5, 0}},
