@@ -6,12 +6,14 @@ package ordinarykriging
 
 import (
 	"errors"
+	"fmt"
 	"github.com/liuvigongzuoshi/go-kriging/canvas"
 	"image"
 	"image/color"
 	"math"
 	"sort"
 	"sync"
+	"time"
 )
 
 // Variogram ordinary kriging variogram
@@ -93,10 +95,9 @@ func (variogram *Variogram) Train(model ModelType, sigma2 float64, alpha float64
 	k = 0
 	for ; i < n; i++ {
 		for j = 0; j < i; {
-			tmp := [2]float64{}
-			tmp[0] = math.Sqrt(pow2(variogram.x[i]-variogram.x[j]) + pow2(variogram.y[i]-variogram.y[j]))
-			tmp[1] = math.Abs(variogram.t[i] - variogram.t[j])
-			distance = append(distance, tmp)
+			distance[k] = [2]float64{}
+			distance[k][0] = math.Sqrt(pow2(variogram.x[i]-variogram.x[j]) + pow2(variogram.y[i]-variogram.y[j]))
+			distance[k][1] = math.Abs(variogram.t[i] - variogram.t[j])
 			j++
 			k++
 		}
@@ -236,6 +237,206 @@ func (variogram *Variogram) Train(model ModelType, sigma2 float64, alpha float64
 	return variogram, nil
 }
 
+// Train using gaussian processes with bayesian priors
+func (variogram *Variogram) TrainNew(model ModelType, sigma2 float64, alpha float64) (*Variogram, error) {
+	variogram.Nugget = 0.0
+	variogram.Range = 0.0
+	variogram.Sill = 0.0
+	variogram.A = float64(1) / float64(3)
+	variogram.N = 0.0
+
+	switch model {
+	case Gaussian:
+		variogram.model = krigingVariogramGaussian
+		break
+	case Exponential:
+		variogram.model = krigingVariogramExponential
+		break
+	case Spherical:
+		variogram.model = krigingVariogramSpherical
+		break
+	}
+
+	// Lag distance/semivariance
+	var i, j, k, l, n int
+	n = len(variogram.t)
+
+	var distance DistanceList
+	distance = make([][2]float64, (n*n-n)/2)
+
+	i = 0
+	k = 0
+	for ; i < n; i++ {
+		for j = 0; j < i; {
+			distance[k] = [2]float64{}
+			distance[k][0] = math.Sqrt(pow2(variogram.x[i]-variogram.x[j]) + pow2(variogram.y[i]-variogram.y[j]))
+			distance[k][1] = math.Abs(variogram.t[i] - variogram.t[j])
+			j++
+			k++
+		}
+	}
+	sort.Sort(distance)
+	variogram.Range = distance[(n*n-n)/2-1][0]
+
+	// Bin lag distance
+	var lags int
+	if ((n*n - n) / 2) > 30 {
+		lags = 30
+	} else {
+		lags = (n*n - n) / 2
+	}
+
+	tolerance := variogram.Range / float64(lags)
+
+	lag := make([]float64, lags)
+	semi := make([]float64, lags)
+	if lags < 30 {
+		for l = 0; l < lags; l++ {
+			lag[l] = distance[l][0]
+			semi[l] = distance[l][1]
+		}
+	} else {
+		i = 0
+		j = 0
+		k = 0
+		l = 0
+		for i < lags && j < ((n*n-n)/2) {
+			for {
+				if distance[j][0] > (float64(i+1) * tolerance) {
+					break
+				}
+				lag[l] += distance[j][0]
+				semi[l] += distance[j][1]
+				j++
+				k++
+				if j >= ((n*n - n) / 2) {
+					break
+				}
+			}
+
+			if k > 0 {
+				lag[l] = lag[l] / float64(k)
+				semi[l] = semi[l] / float64(k)
+				l++
+			}
+			i++
+			k = 0
+		}
+		if l < 2 {
+			return nil, errors.New("not enough points")
+		}
+	}
+
+	// Feature transformation
+	n = l
+	variogram.Range = lag[n-1] - lag[0]
+	X := make([]float64, 2*n)
+	for i := 0; i < len(X); i++ {
+		X[i] = 1
+	}
+	Y := make([]float64, n)
+	var A = variogram.A
+	for i = 0; i < n; i++ {
+		switch model {
+		case Gaussian:
+			X[i*2+1] = 1.0 - exp(-(1.0/A)*pow2(lag[i]/variogram.Range))
+			break
+		case Exponential:
+			X[i*2+1] = 1.0 - exp(-(1.0/A)*lag[i]/variogram.Range)
+			break
+		case Spherical:
+			X[i*2+1] = 1.5*(lag[i]/variogram.Range) - 0.5*pow3(lag[i]/variogram.Range)
+			break
+		}
+		Y[i] = semi[i]
+	}
+
+	// Least squares
+	var Xt = matrixTranspose(X, n, 2)
+	var Z = matrixMultiply(Xt, X, 2, n, 2)
+	Z = matrixAdd(Z, matrixDiag(float64(1)/alpha, 2), 2, 2)
+	var cloneZ = make([]float64, len(Z))
+	copy(cloneZ, Z)
+	if matrixChol(Z, 2) {
+		matrixChol2inv(Z, 2)
+	} else {
+		// TODO false
+		Z, _ = matrixInverse(cloneZ, 2)
+	}
+
+	var W = matrixMultiply(matrixMultiply(Z, Xt, 2, 2, n), Y, 2, n, 1)
+
+	// Variogram parameters
+	variogram.Nugget = W[0]
+	variogram.Sill = W[1]*variogram.Range + variogram.Nugget
+	variogram.N = len(variogram.x)
+
+	// Gram matrix with prior
+	n = len(variogram.x)
+	K := make([]float64, n*n)
+
+	distanceChan := make(chan int, n)
+	var nGroup sync.WaitGroup
+
+	for i = 0; i < n; i++ {
+		nGroup.Add(1)
+		go func(i int) {
+			defer nGroup.Done()
+			fmt.Printf("K start %d\n", i)
+			for j := 0; j < i; j++ {
+				K[i*n+j] = variogram.model(
+					math.Sqrt(pow2(variogram.x[i]-variogram.x[j])+pow2(variogram.y[i]-variogram.y[j])),
+					variogram.Nugget,
+					variogram.Range,
+					variogram.Sill,
+					variogram.A)
+				K[j*n+i] = K[i*n+j]
+			}
+			K[i*n+i] = variogram.model(0, variogram.Nugget,
+				variogram.Range,
+				variogram.Sill,
+				variogram.A)
+			fmt.Printf("K end %d\n", i)
+			distanceChan <- 0
+		}(i)
+	}
+
+	go func() {
+		nGroup.Wait()
+		close(distanceChan)
+	}()
+
+loop:
+	for {
+		select {
+		case _, ok := <-distanceChan:
+			if !ok {
+				break loop // distanceChan was closed
+			}
+		}
+	}
+
+	fmt.Printf("matrixAdd start\n")
+	// Inverse penalized Gram matrix projected to target vector
+	var C = matrixAdd(K, matrixDiag(sigma2, n), n, n)
+	var cloneC = make([]float64, len(C))
+	copy(cloneC, C)
+	if matrixChol(C, n) {
+		matrixChol2inv(C, n)
+	} else {
+		// TODO false
+		C, _ = matrixInverse(cloneC, n)
+	}
+
+	// Copy unprojected inverted matrix as K 复制未投影的逆矩阵为K
+	copy(K, C)
+	var M = matrixMultiply(C, variogram.t, n, n, 1)
+	variogram.K = K
+	variogram.M = M
+
+	return variogram, nil
+}
+
 // Predict model prediction
 func (variogram *Variogram) Predict(x, y float64) float64 {
 	k := make([]float64, variogram.N)
@@ -335,12 +536,14 @@ func (variogram *Variogram) Grid(polygon PolygonCoordinates, width float64) *Gri
 		var wg sync.WaitGroup
 		predictCh := make(chan *PredictDate, (b[1]-b[0])*(a[1]-a[0]))
 		var parallelPredict = func(j, k int, polygon []Point, xTarget, yTarget float64) {
+			defer func() {
+				wg.Done()
+			}()
 			predictDate := &PredictDate{X: j, Y: k}
 			predictDate.Value = variogram.Predict(xTarget,
 				yTarget,
 			)
 			predictCh <- predictDate
-			defer wg.Done()
 		}
 
 		var xTarget, yTarget float64
@@ -376,6 +579,21 @@ func (variogram *Variogram) Grid(polygon PolygonCoordinates, width float64) *Gri
 			}
 
 		}
+		//loop:
+		//for {
+		//	select {
+		//	case predictDate, ok:= <-predictCh:
+		//		if (!ok) {
+		//			break loop
+		//		}
+		//		if predictDate.Value != 0 {
+		//			j := predictDate.X
+		//			k := predictDate.Y
+		//			A[j][k] = predictDate.Value
+		//		}
+		//	}
+		//}
+
 	}
 
 	gridMatrices := &GridMatrices{
@@ -387,6 +605,293 @@ func (variogram *Variogram) Grid(polygon PolygonCoordinates, width float64) *Gri
 		NodataValue: nodataValue,
 	}
 	return gridMatrices
+}
+
+// Grid gridded matrices or contour paths
+// 根据 PolygonCoordinates 生成裁剪过的矩阵网格数据
+// 这里 polygon 是一个三维数组，可以变相的支持的多个面，但不符合 Polygon 规范
+// PolygonCoordinates [[[x,y]],[[x,y]]] 两个面
+func (variogram *Variogram) GridNew2(polygon PolygonCoordinates, width float64) *GridMatrices {
+	n := len(polygon)
+	if n == 0 {
+		return &GridMatrices{}
+	}
+
+	var nodataValue float64 = -9999
+
+	// Boundaries of polygon space
+	xlim := [2]float64{polygon[0][0][0], polygon[0][0][0]}
+	ylim := [2]float64{polygon[0][0][1], polygon[0][0][1]}
+
+	// Polygons
+	for i := 0; i < n; i++ {
+		// Vertices
+		for j := 0; j < len(polygon[i]); j++ {
+			if polygon[i][j][0] < xlim[0] {
+				xlim[0] = polygon[i][j][0]
+			}
+			if polygon[i][j][0] > xlim[1] {
+				xlim[1] = polygon[i][j][0]
+			}
+			if polygon[i][j][1] < ylim[0] {
+				ylim[0] = polygon[i][j][1]
+			}
+			if polygon[i][j][1] > ylim[1] {
+				ylim[1] = polygon[i][j][1]
+			}
+		}
+	}
+
+	// Alloc for O(N^2) space
+	x := int(math.Ceil((xlim[1] - xlim[0]) / width))
+	y := int(math.Ceil((ylim[1] - ylim[0]) / width))
+
+	A := make([][]float64, x+1)
+	for i := 0; i <= x; i++ {
+		A[i] = make([]float64, y+1)
+	}
+
+	for i := 0; i < n; i++ {
+		currentPolygon := polygon[i]
+		var lxlim [2]float64 // Local dimensions
+		var lylim [2]float64 // Local dimensions
+		// Range for currentPolygon
+		lxlim[0] = currentPolygon[0][0]
+		lxlim[1] = lxlim[0]
+		lylim[0] = currentPolygon[0][1]
+		lylim[1] = lylim[0]
+		for j := 1; j < len(currentPolygon); j++ { // Vertices
+			if currentPolygon[j][0] < lxlim[0] {
+				lxlim[0] = currentPolygon[j][0]
+			}
+			if currentPolygon[j][0] > lxlim[1] {
+				lxlim[1] = currentPolygon[j][0]
+			}
+			if currentPolygon[j][1] < lylim[0] {
+				lylim[0] = currentPolygon[j][1]
+			}
+			if currentPolygon[j][1] > lylim[1] {
+				lylim[1] = currentPolygon[j][1]
+			}
+		}
+
+		var a, b [2]int
+		// Loop through polygon subspace
+		a[0] = int(math.Floor(((lxlim[0] - math.Mod(lxlim[0]-xlim[0], width)) - xlim[0]) / width))
+		a[1] = int(math.Ceil(((lxlim[1] - math.Mod(lxlim[1]-xlim[1], width)) - xlim[0]) / width))
+		b[0] = int(math.Floor(((lylim[0] - math.Mod(lylim[0]-ylim[0], width)) - ylim[0]) / width))
+		b[1] = int(math.Ceil(((lylim[1] - math.Mod(lylim[1]-ylim[1], width)) - ylim[0]) / width))
+
+		var wg sync.WaitGroup
+		predictCh := make(chan byte, (b[1]-b[0])*(a[1]-a[0]))
+		//var parallelPredict = func(j, k int, polygon []Point, xTarget, yTarget float64) {
+		//	start := time.Now()
+		//	defer func() {
+		//		tc := time.Since(start)
+		//		fmt.Printf("%v : time cost = %v s\n", "parallelPredict", tc.Seconds())
+		//		wg.Done()
+		//	}()
+		//	predictDate := &PredictDate{X: j, Y: k}
+		//	predictDate.Value = variogram.Predict(xTarget,
+		//		yTarget,
+		//	)
+		//	predictCh <- predictDate
+		//}
+
+		var xTarget float64
+		for j := a[0]; j <= a[1]; j++ {
+			xTarget = xlim[0] + float64(j)*width
+			wg.Add(1)
+			go func(j int, xTarget float64) {
+				for k := b[0]; k <= b[1]; k++ {
+					yTarget := ylim[0] + float64(k)*width
+
+					if pipFloat64(currentPolygon, xTarget, yTarget) {
+						A[j][k] = variogram.Predict(xTarget, yTarget)
+					} else {
+						A[j][k] = nodataValue
+					}
+					//if pipFloat64(currentPolygon, xTarget, yTarget) {
+					//	A[j][k] = variogram.Predict(xTarget,
+					//		yTarget,
+					//	)
+					//}
+				}
+				predictCh <- 0
+				wg.Done()
+			}(j, xTarget)
+
+		}
+
+		go func() {
+			wg.Wait()
+			close(predictCh)
+		}()
+
+		for _ = range predictCh {
+		}
+		//loop:
+		//for {
+		//	select {
+		//	case predictDate, ok:= <-predictCh:
+		//		if (!ok) {
+		//			break loop
+		//		}
+		//		if predictDate.Value != 0 {
+		//			j := predictDate.X
+		//			k := predictDate.Y
+		//			A[j][k] = predictDate.Value
+		//		}
+		//	}
+		//}
+
+	}
+
+	gridMatrices := &GridMatrices{
+		Xlim:        xlim,
+		Ylim:        ylim,
+		Zlim:        [2]float64{minFloat64(variogram.t), maxFloat64(variogram.t)},
+		Width:       width,
+		Data:        A,
+		NodataValue: nodataValue,
+	}
+	return gridMatrices
+}
+
+// Grid gridded matrices or contour paths
+// 根据 PolygonCoordinates 生成裁剪过的矩阵网格数据
+// 这里 polygon 是一个三维数组，可以变相的支持的多个面，但不符合 Polygon 规范
+// PolygonCoordinates [[[x,y]],[[x,y]]] 两个面
+func (variogram *Variogram) GridNew(polygon PolygonCoordinates, width float64) *GridMatrices {
+	n := len(polygon)
+	if n == 0 {
+		return &GridMatrices{}
+	}
+
+	var nodataValue float64 = -9999
+
+	// Boundaries of polygon space
+	xlim := [2]float64{polygon[0][0][0], polygon[0][0][0]}
+	ylim := [2]float64{polygon[0][0][1], polygon[0][0][1]}
+
+	// Polygons
+	for i := 0; i < n; i++ {
+		// Vertices
+		for j := 0; j < len(polygon[i]); j++ {
+			if polygon[i][j][0] < xlim[0] {
+				xlim[0] = polygon[i][j][0]
+			}
+			if polygon[i][j][0] > xlim[1] {
+				xlim[1] = polygon[i][j][0]
+			}
+			if polygon[i][j][1] < ylim[0] {
+				ylim[0] = polygon[i][j][1]
+			}
+			if polygon[i][j][1] > ylim[1] {
+				ylim[1] = polygon[i][j][1]
+			}
+		}
+	}
+
+	// Alloc for O(N^2) space
+	x := int(math.Ceil((xlim[1] - xlim[0]) / width))
+	y := int(math.Ceil((ylim[1] - ylim[0]) / width))
+
+	A := make([][]float64, x+1)
+	for i := 0; i <= x; i++ {
+		A[i] = make([]float64, y+1)
+	}
+
+	var wgGrid sync.WaitGroup
+	for i := 0; i < n; i++ {
+		fmt.Printf("polygon start %d %d\n", i, n)
+		gridThread(polygon, width, i, &xlim, &ylim, &A, variogram, nodataValue, &wgGrid)
+		fmt.Printf("polygon end %d %d\n", i, n)
+	}
+
+	wgGrid.Wait()
+	//go func() {
+	//	wgGrid.Wait()
+	//	close(predictCh)
+	//}()
+	//
+	//for range predictCh {
+	//
+	//}
+
+	gridMatrices := &GridMatrices{
+		Xlim:        xlim,
+		Ylim:        ylim,
+		Zlim:        [2]float64{minFloat64(variogram.t), maxFloat64(variogram.t)},
+		Width:       width,
+		Data:        A,
+		NodataValue: nodataValue,
+	}
+	return gridMatrices
+}
+
+func gridThread(polygon PolygonCoordinates, width float64, i int, xlim *[2]float64, ylim *[2]float64, A *[][]float64, variogram *Variogram, nodataValue float64, wgGrid *sync.WaitGroup) {
+	currentPolygon := polygon[i]
+
+	var lxlim [2]float64 // Local dimensions
+	var lylim [2]float64 // Local dimensions
+	// Range for currentPolygon
+	lxlim[0] = currentPolygon[0][0]
+	lxlim[1] = lxlim[0]
+	lylim[0] = currentPolygon[0][1]
+	lylim[1] = lylim[0]
+	for j := 1; j < len(currentPolygon); j++ { // Vertices
+		if currentPolygon[j][0] < lxlim[0] {
+			lxlim[0] = currentPolygon[j][0]
+		}
+		if currentPolygon[j][0] > lxlim[1] {
+			lxlim[1] = currentPolygon[j][0]
+		}
+		if currentPolygon[j][1] < lylim[0] {
+			lylim[0] = currentPolygon[j][1]
+		}
+		if currentPolygon[j][1] > lylim[1] {
+			lylim[1] = currentPolygon[j][1]
+		}
+	}
+
+	var a, b [2]int
+	// Loop through polygon subspace
+	a[0] = int(math.Floor(((lxlim[0] - math.Mod(lxlim[0]-xlim[0], width)) - xlim[0]) / width))
+	a[1] = int(math.Ceil(((lxlim[1] - math.Mod(lxlim[1]-xlim[1], width)) - xlim[0]) / width))
+	b[0] = int(math.Floor(((lylim[0] - math.Mod(lylim[0]-ylim[0], width)) - ylim[0]) / width))
+	b[1] = int(math.Ceil(((lylim[1] - math.Mod(lylim[1]-ylim[1], width)) - ylim[0]) / width))
+
+	var xTarget, yTarget float64
+	for j := a[0]; j <= a[1]; j++ {
+		xTarget = xlim[0] + float64(j)*width
+		wgGrid.Add(1)
+		go func(j int) {
+			defer func() {
+				wgGrid.Done()
+			}()
+			for k := b[0]; k <= b[1]; k++ {
+				yTarget = ylim[0] + float64(k)*width
+
+				if pipFloat64(currentPolygon, xTarget, yTarget) {
+					(*A)[j][k] = variogram.Predict(xTarget,
+						yTarget,
+					)
+				} else {
+					(*A)[j][k] = nodataValue
+				}
+			}
+		}(j)
+	}
+
+}
+
+func timeCost() func(name string) {
+	start := time.Now()
+	return func(name string) {
+		tc := time.Since(start)
+		fmt.Printf("%v : time cost = %v s\n", name, tc.Seconds())
+	}
 }
 
 // Contour contour paths

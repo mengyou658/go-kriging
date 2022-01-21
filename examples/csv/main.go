@@ -18,7 +18,7 @@ import (
 )
 
 const testDataDirPath = "testdata"
-const tempDataDirPath = "C:/"
+const tempDataDirPath = "C:"
 const cpuProfileFilePath = tempDataDirPath + "/cpu_profile"
 const memProfileFilePath = tempDataDirPath + "/mem_profile"
 
@@ -72,7 +72,8 @@ func gridPlot(ordinaryKriging *ordinarykriging.Variogram, polygon ordinarykrigin
 	defer timeCost()("插值生成网格图片耗时")
 	gridMatrices := ordinaryKriging.Grid(polygon, 0.01)
 	//var defaultColor = ordinarykriging.DefaultGridLevelColor
-	var colorStr = "[{\"value\":[0,15],\"color\":[0,0,255,255]},{\"value\":[0,15],\"color\":[5,89,252,255]},{\"value\":[0,15],\"color\":[23,190,254,255]},{\"value\":[0,15],\"color\":[21,255,225,255]},{\"value\":[0,15],\"color\":[21,255,144,255]},{\"value\":[0,15],\"color\":[19,255,24,255]},{\"value\":[0,15],\"color\":[156,255,2,255]},{\"value\":[0,15],\"color\":[205,255,19,255]},{\"value\":[0,15],\"color\":[239,222,15,255]},{\"value\":[0,15],\"color\":[253,128,17,255]},{\"value\":[0,15],\"color\":[255,63,2,255]},{\"value\":[-30,-15],\"color\":{\"R\":40,\"G\":146,\"B\":199,\"A\":255}},{\"value\":[-15,-10],\"color\":{\"R\":96,\"G\":163,\"B\":181,\"A\":255}},{\"value\":[-10,-5],\"color\":{\"R\":140,\"G\":184,\"B\":164,\"A\":255}},{\"value\":[-5,0],\"color\":{\"R\":177,\"G\":204,\"B\":145,\"A\":255}},{\"value\":[0,5],\"color\":{\"R\":215,\"G\":227,\"B\":125,\"A\":255}},{\"value\":[5,10],\"color\":{\"R\":250,\"G\":250,\"B\":100,\"A\":255}},{\"value\":[10,15],\"color\":{\"R\":252,\"G\":207,\"B\":81,\"A\":255}},{\"value\":[15,20],\"color\":{\"R\":252,\"G\":164,\"B\":63,\"A\":255}},{\"value\":[20,25],\"color\":{\"R\":247,\"G\":122,\"B\":45,\"A\":255}},{\"value\":[25,30],\"color\":{\"R\":242,\"G\":77,\"B\":31,\"A\":255}},{\"value\":[30,40],\"color\":{\"R\":232,\"G\":16,\"B\":20,\"A\":255}}]"
+	//var colorStr = "[{\"value\":[0,15],\"color\":[0,0,255,255]},{\"value\":[0,15],\"color\":[5,89,252,255]},{\"value\":[0,15],\"color\":[23,190,254,255]},{\"value\":[0,15],\"color\":[21,255,225,255]},{\"value\":[0,15],\"color\":[21,255,144,255]},{\"value\":[0,15],\"color\":[19,255,24,255]},{\"value\":[0,15],\"color\":[156,255,2,255]},{\"value\":[0,15],\"color\":[205,255,19,255]},{\"value\":[0,15],\"color\":[239,222,15,255]},{\"value\":[0,15],\"color\":[253,128,17,255]},{\"value\":[0,15],\"color\":[255,63,2,255]},{\"value\":[-30,-15],\"color\":{\"R\":40,\"G\":146,\"B\":199,\"A\":255}},{\"value\":[-15,-10],\"color\":{\"R\":96,\"G\":163,\"B\":181,\"A\":255}},{\"value\":[-10,-5],\"color\":{\"R\":140,\"G\":184,\"B\":164,\"A\":255}},{\"value\":[-5,0],\"color\":{\"R\":177,\"G\":204,\"B\":145,\"A\":255}},{\"value\":[0,5],\"color\":{\"R\":215,\"G\":227,\"B\":125,\"A\":255}},{\"value\":[5,10],\"color\":{\"R\":250,\"G\":250,\"B\":100,\"A\":255}},{\"value\":[10,15],\"color\":{\"R\":252,\"G\":207,\"B\":81,\"A\":255}},{\"value\":[15,20],\"color\":{\"R\":252,\"G\":164,\"B\":63,\"A\":255}},{\"value\":[20,25],\"color\":{\"R\":247,\"G\":122,\"B\":45,\"A\":255}},{\"value\":[25,30],\"color\":{\"R\":242,\"G\":77,\"B\":31,\"A\":255}},{\"value\":[30,40],\"color\":{\"R\":232,\"G\":16,\"B\":20,\"A\":255}}]"
+	var colorStr = "[{\"value\":[0,15],\"color\":[0,0,255,255]},{\"value\":[0,15],\"color\":[5,89,252,255]},{\"value\":[0,15],\"color\":[23,190,254,255]},{\"value\":[0,15],\"color\":[21,255,225,255]},{\"value\":[0,15],\"color\":[21,255,144,255]},{\"value\":[0,15],\"color\":[19,255,24,255]},{\"value\":[0,15],\"color\":[156,255,2,255]},{\"value\":[0,15],\"color\":[205,255,19,255]},{\"value\":[0,15],\"color\":[239,222,15,255]},{\"value\":[0,15],\"color\":[253,128,17,255]},{\"value\":[0,15],\"color\":[255,63,2,255]}]"
 	var color = []ordinarykriging.GridLevelColor{}
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
 	_ = json.Unmarshal([]byte(colorStr), &color)
